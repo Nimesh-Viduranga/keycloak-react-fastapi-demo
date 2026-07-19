@@ -1,0 +1,151 @@
+:root {
+  --bg: #0f1419;
+  --card: #1a222d;
+  --text: #e8eef5;
+  --muted: #9aa8b8;
+  --accent: #3d8bfd;
+  --accent-2: #2f6fbf;
+  --danger: #c45c5c;
+  --border: #2c3848;
+  font-family: "Segoe UI", system-ui, sans-serif;
+  color: var(--text);
+  background: radial-gradient(1200px 600px at 10% -10%, #1c2a3d, var(--bg));
+  line-height: 1.5;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: transparent;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.app-shell {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 1.5rem;
+}
+
+.topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 2rem;
+}
+
+.brand {
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.topbar nav {
+  display: flex;
+  gap: 1rem;
+  color: var(--muted);
+}
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1.75rem;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.25);
+}
+
+.card h1 {
+  margin: 0 0 0.75rem;
+  font-size: 1.6rem;
+}
+
+.muted {
+  color: var(--muted);
+}
+
+.error {
+  color: #ffb4b4;
+  background: rgba(196, 92, 92, 0.15);
+  border: 1px solid rgba(196, 92, 92, 0.4);
+  padding: 0.65rem 0.85rem;
+  border-radius: 8px;
+}
+
+.actions {
+  display: flex;
+  gap: 0.75rem;
+  margin: 1.5rem 0;
+  flex-wrap: wrap;
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 8px;
+  padding: 0.7rem 1.1rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.btn.primary {
+  background: var(--accent);
+  color: #fff;
+}
+
+.btn.primary:hover {
+  background: var(--accent-2);
+}
+
+.btn.secondary {
+  background: transparent;
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+
+.btn.danger {
+  background: var(--danger);
+  color: #fff;
+  margin-top: 1rem;
+}
+
+.steps {
+  color: var(--muted);
+  padding-left: 1.2rem;
+}
+
+.claims {
+  margin: 1.25rem 0 0;
+}
+
+.claims > div {
+  display: grid;
+  grid-template-columns: 120px 1fr;
+  gap: 0.5rem;
+  padding: 0.55rem 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.claims dt {
+  color: var(--muted);
+  margin: 0;
+}
+
+.claims dd {
+  margin: 0;
+  word-break: break-all;
+}
+
+code {
+  font-size: 0.9em;
+  background: rgba(255, 255, 255, 0.06);
+  padding: 0.1em 0.35em;
+  border-radius: 4px;
+}
