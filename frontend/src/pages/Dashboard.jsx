@@ -1,34 +1,37 @@
 import { useEffect, useState } from 'react'
-import { fetchMe, logout } from '../api'
+import { fetchMe } from '../api'
+import { useAuth } from '../auth/AuthContext'
 
 export default function Dashboard() {
+  const { user: oidcUser, loading: authLoading, getAccessToken, login, logout } = useAuth()
   const [user, setUser] = useState(undefined)
   const [error, setError] = useState('')
 
   useEffect(() => {
+    if (authLoading) return
     let cancelled = false
-    fetchMe()
-      .then((u) => {
-        if (!cancelled) setUser(u)
-      })
-      .catch((e) => {
+
+    async function load() {
+      try {
+        const token = await getAccessToken()
+        if (!token) {
+          if (!cancelled) setUser(null)
+          return
+        }
+        const profile = await fetchMe(token)
+        if (!cancelled) setUser(profile)
+      } catch (e) {
         if (!cancelled) setError(e.message)
-      })
+      }
+    }
+
+    load()
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [authLoading, getAccessToken, oidcUser])
 
-  async function onLogout() {
-    try {
-      const url = await logout()
-      window.location.href = url
-    } catch (e) {
-      setError(e.message)
-    }
-  }
-
-  if (user === undefined && !error) {
+  if (authLoading || (user === undefined && !error)) {
     return <section className="card">Loading session…</section>
   }
 
@@ -38,9 +41,9 @@ export default function Dashboard() {
         <h1>Protected dashboard</h1>
         <p className="muted">You are not logged in.</p>
         {error && <p className="error">{error}</p>}
-        <a className="btn primary" href="/auth/login">
+        <button type="button" className="btn primary" onClick={() => login()}>
           Log in with Keycloak
-        </a>
+        </button>
       </section>
     )
   }
@@ -48,7 +51,9 @@ export default function Dashboard() {
   return (
     <section className="card">
       <h1>Welcome</h1>
-      <p className="muted">Session loaded from FastAPI <code>/api/me</code>.</p>
+      <p className="muted">
+        Profile from FastAPI <code>/api/me</code> (Bearer access token validated via JWKS).
+      </p>
       <dl className="claims">
         <div>
           <dt>sub</dt>
@@ -67,7 +72,7 @@ export default function Dashboard() {
           <dd>{user.preferred_username || '—'}</dd>
         </div>
       </dl>
-      <button type="button" className="btn danger" onClick={onLogout}>
+      <button type="button" className="btn danger" onClick={() => logout()}>
         Log out
       </button>
     </section>

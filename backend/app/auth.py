@@ -1,64 +1,70 @@
-"""OIDC helpers for Keycloak via Authlib (BFF pattern)."""
+"""JWT validation helpers for Keycloak access tokens (SPA public-client pattern)."""
 
 from __future__ import annotations
 
-import base64
-import json
 from typing import Any
-from urllib.parse import urlencode
 
-from authlib.integrations.starlette_client import OAuth
-from fastapi import HTTPException, Request
+import jwt
+from fastapi import Depends, HTTPException, Request
+from jwt import PyJWKClient
 
 from .config import Settings, get_settings
 
-oauth = OAuth()
+_jwks_clients: dict[str, PyJWKClient] = {}
 
 
-def register_oauth(settings: Settings | None = None) -> None:
+def _jwks_client(settings: Settings) -> PyJWKClient:
+    url = settings.jwks_url
+    if url not in _jwks_clients:
+        _jwks_clients[url] = PyJWKClient(url, cache_keys=True)
+    return _jwks_clients[url]
+
+
+def decode_access_token(token: str, settings: Settings | None = None) -> dict[str, Any]:
     settings = settings or get_settings()
-    oauth.register(
-        name="keycloak",
-        client_id=settings.keycloak_client_id,
-        client_secret=settings.keycloak_client_secret,
-        server_metadata_url=settings.metadata_url,
-        client_kwargs={"scope": "openid email profile"},
-    )
-
-
-def decode_id_token_payload(id_token: str) -> dict[str, Any]:
-    """Decode JWT payload without signature check (token from server-side code exchange)."""
-    parts = id_token.split(".")
-    if len(parts) != 3:
-        return {}
-    payload = parts[1]
-    padding = "=" * (-len(payload) % 4)
     try:
-        raw = base64.urlsafe_b64decode(payload + padding)
-        data = json.loads(raw.decode("utf-8"))
-        return data if isinstance(data, dict) else {}
-    except (ValueError, json.JSONDecodeError, UnicodeDecodeError):
-        return {}
+        signing_key = _jwks_client(settings).get_signing_key_from_jwt(token)
+        claims = jwt.decode(
+            token,
+            signing_key.key,
+            algorithms=["RS256"],
+            issuer=settings.issuer,
+            options={"verify_aud": False},
+        )
+    except jwt.PyJWTError as exc:
+        raise HTTPException(status_code=401, detail=f"Invalid token: {exc}") from exc
+
+    azp = claims.get("azp")
+    aud = claims.get("aud")
+    client_id = settings.keycloak_client_id
+    aud_ok = aud == client_id or (isinstance(aud, list) and client_id in aud)
+    azp_ok = azp == client_id
+    if not (aud_ok or azp_ok):
+        raise HTTPException(status_code=401, detail="Token audience/azp mismatch")
+
+    return claims
 
 
-def user_from_session(request: Request) -> dict[str, Any] | None:
-    user = request.session.get("user")
-    return user if isinstance(user, dict) else None
+def bearer_token(request: Request) -> str:
+    header = request.headers.get("Authorization") or ""
+    if not header.lower().startswith("bearer "):
+        raise HTTPException(status_code=401, detail="Missing Bearer token")
+    token = header[7:].strip()
+    if not token:
+        raise HTTPException(status_code=401, detail="Missing Bearer token")
+    return token
 
 
-def require_user(request: Request) -> dict[str, Any]:
-    user = user_from_session(request)
-    if not user:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    return user
-
-
-def end_session_url(id_token: str | None, settings: Settings | None = None) -> str:
-    settings = settings or get_settings()
-    params = {
-        "post_logout_redirect_uri": settings.post_logout_redirect_uri,
-        "client_id": settings.keycloak_client_id,
+def require_user(token: str = Depends(bearer_token)) -> dict[str, Any]:
+    claims = decode_access_token(token)
+    sub = claims.get("sub")
+    if not sub:
+        raise HTTPException(status_code=401, detail="Token missing sub")
+    return {
+        "sub": sub,
+        "email": claims.get("email"),
+        "name": claims.get("name") or claims.get("preferred_username"),
+        "preferred_username": claims.get("preferred_username"),
+        "given_name": claims.get("given_name"),
+        "family_name": claims.get("family_name"),
     }
-    if id_token:
-        params["id_token_hint"] = id_token
-    return f"{settings.realm_url}/protocol/openid-connect/logout?{urlencode(params)}"

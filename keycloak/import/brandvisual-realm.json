@@ -13,17 +13,16 @@
   "clients": [
     {
       "clientId": "react-fastapi-demo",
-      "name": "React FastAPI BFF Demo",
+      "name": "React SPA OIDC Demo",
       "enabled": true,
       "protocol": "openid-connect",
-      "publicClient": false,
-      "secret": "brandvisual-demo-secret",
+      "publicClient": true,
       "standardFlowEnabled": true,
       "directAccessGrantsEnabled": false,
       "serviceAccountsEnabled": false,
       "redirectUris": [
-        "http://localhost:8088/auth/callback",
-        "http://localhost:5173/auth/callback"
+        "http://localhost:8088/callback",
+        "http://localhost:5173/callback"
       ],
       "webOrigins": [
         "http://localhost:8088",
@@ -32,6 +31,7 @@
       "rootUrl": "http://localhost:8088",
       "baseUrl": "http://localhost:8088",
       "attributes": {
+        "pkce.code.challenge.method": "S256",
         "post.logout.redirect.uris": "http://localhost:8088/*##http://localhost:5173/*"
       },
       "defaultClientScopes": [
