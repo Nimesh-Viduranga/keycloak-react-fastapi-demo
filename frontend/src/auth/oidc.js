@@ -1,10 +1,15 @@
 import { UserManager, WebStorageStateStore } from 'oidc-client-ts'
 
-const authority =
-  import.meta.env.VITE_KEYCLOAK_AUTHORITY ||
-  'http://localhost:8090/realms/brandvisual'
+// Public OIDC settings from Vite env (frontend/.env or Docker build args).
+// Never put a client secret here — this client is public.
+const authority = import.meta.env.VITE_KEYCLOAK_AUTHORITY
+const clientId = import.meta.env.VITE_CLIENT_ID
 
-const clientId = import.meta.env.VITE_CLIENT_ID || 'react-fastapi-demo'
+if (!authority || !clientId) {
+  throw new Error(
+    'Missing VITE_KEYCLOAK_AUTHORITY or VITE_CLIENT_ID. Copy frontend/.env.example to frontend/.env',
+  )
+}
 
 export function createUserManager() {
   const origin = window.location.origin

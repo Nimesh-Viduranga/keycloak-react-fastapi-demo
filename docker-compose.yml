@@ -57,7 +57,11 @@ services:
 
   # Nginx: React static + reverse proxy /api → backend
   nginx:
-    build: ./frontend
+    build:
+      context: ./frontend
+      args:
+        VITE_KEYCLOAK_AUTHORITY: http://localhost:8090/realms/brandvisual
+        VITE_CLIENT_ID: react-fastapi-demo
     container_name: brandvisual-nginx
     ports:
       - "8088:80"
