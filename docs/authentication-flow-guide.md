@@ -78,26 +78,66 @@ Authority (discovery):
      · navigate → /dashboard
 
 5. Dashboard: getAccessToken() → GET /api/me with Bearer token
-   FastAPI: verify signature (JWKS), iss, exp, azp/aud → return claims
+   FastAPI: verify signature (JWKS) + iss + exp + aud (+ azp defense-in-depth) → return claims
+```
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User
+    participant SPA as Browser (React SPA)
+    participant KC as Keycloak (IAM)
+    participant API as FastAPI (Resource Server)
+
+    User->>SPA: Click "Log in"
+    SPA->>SPA: signinRedirect() — make PKCE verifier/challenge (S256), state, nonce
+    SPA->>KC: 302 /authorize?response_type=code&code_challenge&state&nonce
+    KC-->>User: Show login page
+    User->>KC: Submit credentials
+    KC->>SPA: 302 /callback?code&state
+    SPA->>SPA: signinRedirectCallback() — verify state
+    SPA->>KC: POST /token (code + code_verifier, no client secret)
+    KC->>SPA: access_token + id_token + refresh_token
+    SPA->>SPA: Validate id_token (sig/iss/aud/exp/nonce); store in sessionStorage
+    SPA->>API: GET /api/me (Authorization: Bearer access_token)
+    API->>KC: Fetch JWKS (cached after first call)
+    API->>API: Verify sig(RS256) + iss + exp + aud + azp
+    API->>SPA: 200 { user claims }
+    SPA-->>User: Render dashboard
 ```
 
 ---
 
 ## 4. Signup flow
 
-Same PKCE setup as login, but the authorize URL path is swapped to Keycloak’s
-registration endpoint:
+Identical to login, except the SPA adds the standard OIDC **`prompt=create`**
+parameter so Keycloak shows its **registration** page first (Keycloak 25+):
 
 ```js
 // oidc.js — signinViaRegistration(userManager)
-// Temporarily set metadata.authorization_endpoint to .../registrations
-// then userManager.signinRedirect() (same PKCE + state as login)
+userManager.signinRedirect({ extraQueryParams: { prompt: 'create' } })
 ```
 
-After register, Keycloak still redirects to `/callback` with a code — identical
-token exchange to login.
+After the user registers, Keycloak redirects to `/callback` with a code — the
+token exchange is **identical** to login.
 
 Requires **Realm settings → Login → User registration = ON**.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User
+    participant SPA as Browser (React SPA)
+    participant KC as Keycloak (IAM)
+
+    User->>SPA: Click "Sign up"
+    SPA->>KC: 302 /authorize?...&prompt=create (same PKCE + state as login)
+    KC-->>User: Show registration page
+    User->>KC: Register (Keycloak creates the account)
+    KC->>SPA: 302 /callback?code&state
+    Note over SPA,KC: Identical code + PKCE token exchange as login
+    SPA-->>User: Logged in → dashboard
+```
 
 ---
 
@@ -121,6 +161,23 @@ fetch('/api/me', { headers: { Authorization: `Bearer ${accessToken}` } })
 Nginx (or Vite proxy) still forwards `/api` to FastAPI so the browser can call
 same-origin `/api/me` without CORS pain in docker mode.
 
+**Silent renew.** Access tokens are short-lived (realm `accessTokenLifespan=300`,
+i.e. 5 min). `oidc-client-ts` (`automaticSilentRenew: true`) refreshes them in the
+background before expiry using the refresh token; Keycloak rotates the refresh
+token on each use with reuse detection.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant SPA as Browser (React SPA)
+    participant KC as Keycloak (IAM)
+
+    Note over SPA: access_token nearing 5-min expiry
+    SPA->>KC: POST /token grant_type=refresh_token (automaticSilentRenew)
+    KC->>SPA: New access_token + rotated refresh_token
+    Note over SPA,KC: Previous refresh token invalidated (rotation + reuse detection)
+```
+
 ---
 
 ## 6. Logout flow
@@ -131,6 +188,21 @@ same-origin `/api/me` without CORS pain in docker mode.
      · clears local user store
      · browser → Keycloak end-session (id_token_hint)
      · Keycloak → post_logout_redirect_uri (/)
+```
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User
+    participant SPA as Browser (React SPA)
+    participant KC as Keycloak (IAM)
+
+    User->>SPA: Click "Log out"
+    SPA->>SPA: signoutRedirect() — clear tokens from sessionStorage
+    SPA->>KC: 302 /logout?id_token_hint&post_logout_redirect_uri
+    KC->>KC: Terminate SSO session
+    KC->>SPA: 302 back to post_logout_redirect_uri (/)
+    SPA-->>User: Logged-out state
 ```
 
 ---
@@ -154,7 +226,7 @@ same-origin `/api/me` without CORS pain in docker mode.
 | SPA + PKCE architecture | ✅ | |
 | oidc-client-ts `UserManager` | ✅ | authority / client_id |
 | `/callback` page | ✅ | post-login route |
-| Registrations URL swap for signup | ✅ | if self-signup needed |
+| `prompt=create` for signup | ✅ | if self-signup needed |
 | FastAPI JWKS `require_user` | ✅ | apply to your routes |
 | `sub` as user id | | ✅ map to your user table |
 | sessionStorage tokens | ✅ demo | ✅ harden for production |
