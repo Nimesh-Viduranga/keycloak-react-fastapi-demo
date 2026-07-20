@@ -21,20 +21,10 @@ export function createUserManager() {
 }
 
 /**
- * Point discovery metadata at Keycloak registrations, then run normal PKCE sign-in.
- * Restores the authorize endpoint if redirect setup fails.
+ * Start sign-up. Uses the standard OIDC `prompt=create` parameter (Keycloak 25+),
+ * which lands the user on the registration page while running the same
+ * authorization-code + PKCE flow. No discovery-metadata mutation required.
  */
-export async function signinViaRegistration(userManager) {
-  const meta = await userManager.metadataService.getMetadata()
-  const original = meta.authorization_endpoint
-  meta.authorization_endpoint = original.replace(
-    '/protocol/openid-connect/auth',
-    '/protocol/openid-connect/registrations',
-  )
-  try {
-    await userManager.signinRedirect()
-  } catch (err) {
-    meta.authorization_endpoint = original
-    throw err
-  }
+export function signinViaRegistration(userManager) {
+  return userManager.signinRedirect({ extraQueryParams: { prompt: 'create' } })
 }

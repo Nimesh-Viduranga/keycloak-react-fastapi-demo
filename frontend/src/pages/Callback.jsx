@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
 
@@ -6,8 +6,14 @@ export default function Callback() {
   const { completeLogin } = useAuth()
   const navigate = useNavigate()
   const [error, setError] = useState('')
+  // The authorization code is single-use. React 19 StrictMode double-invokes
+  // effects in dev, and a second signinRedirectCallback() would fail redeeming
+  // an already-consumed code. This latch guarantees exactly one exchange.
+  const startedRef = useRef(false)
 
   useEffect(() => {
+    if (startedRef.current) return
+    startedRef.current = true
     let cancelled = false
     completeLogin()
       .then(() => {
