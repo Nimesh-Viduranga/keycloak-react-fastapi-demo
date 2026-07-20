@@ -1,71 +1,96 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
-import { createUserManager, signinViaRegistration } from './oidc'
+import {
+  callbackRedirectUri,
+  getKeycloak,
+  initKeycloak,
+  postLogoutRedirectUri,
+} from './keycloak'
 
 const AuthContext = createContext(null)
 
 export function AuthProvider({ children }) {
-  const userManager = useMemo(() => createUserManager(), [])
-  const [user, setUser] = useState(null)
+  const [authenticated, setAuthenticated] = useState(false)
   const [loading, setLoading] = useState(true)
+  const [initError, setInitError] = useState('')
 
   useEffect(() => {
     let cancelled = false
-    userManager
-      .getUser()
-      .then((u) => {
-        if (!cancelled) setUser(u && !u.expired ? u : null)
+    const kc = getKeycloak()
+
+    const sync = () => {
+      if (!cancelled) setAuthenticated(!!kc.authenticated)
+    }
+
+    initKeycloak()
+      .then((auth) => {
+        if (cancelled) return
+        setAuthenticated(!!auth)
+        setInitError('')
       })
-      .catch(() => {
-        if (!cancelled) setUser(null)
+      .catch((e) => {
+        if (cancelled) return
+        setAuthenticated(false)
+        setInitError(e?.message || 'Keycloak init failed')
       })
       .finally(() => {
         if (!cancelled) setLoading(false)
       })
 
-    const onUserLoaded = (u) => setUser(u)
-    const onUserUnloaded = () => setUser(null)
-    userManager.events.addUserLoaded(onUserLoaded)
-    userManager.events.addUserUnloaded(onUserUnloaded)
+    kc.onAuthSuccess = sync
+    kc.onAuthLogout = () => {
+      if (!cancelled) setAuthenticated(false)
+    }
+    kc.onAuthRefreshSuccess = sync
+    kc.onAuthRefreshError = () => {
+      if (!cancelled) setAuthenticated(false)
+    }
+    // Proactive refresh when the access token hits expiry (F3).
+    kc.onTokenExpired = () => {
+      kc.updateToken(30).then(sync).catch(() => {
+        if (!cancelled) setAuthenticated(false)
+      })
+    }
 
     return () => {
       cancelled = true
-      userManager.events.removeUserLoaded(onUserLoaded)
-      userManager.events.removeUserUnloaded(onUserUnloaded)
     }
-  }, [userManager])
+  }, [])
 
-  const login = useCallback(() => userManager.signinRedirect(), [userManager])
+  const login = useCallback(() => {
+    return getKeycloak().login({ redirectUri: callbackRedirectUri() })
+  }, [])
 
-  const signup = useCallback(
-    () => signinViaRegistration(userManager),
-    [userManager],
-  )
+  const signup = useCallback(() => {
+    return getKeycloak().register({ redirectUri: callbackRedirectUri() })
+  }, [])
 
-  const completeLogin = useCallback(async () => {
-    const u = await userManager.signinRedirectCallback()
-    setUser(u)
-    return u
-  }, [userManager])
-
-  const logout = useCallback(() => userManager.signoutRedirect(), [userManager])
+  const logout = useCallback(() => {
+    return getKeycloak().logout({ redirectUri: postLogoutRedirectUri() })
+  }, [])
 
   const getAccessToken = useCallback(async () => {
-    const u = await userManager.getUser()
-    if (!u || u.expired) return null
-    return u.access_token
-  }, [userManager])
+    const kc = getKeycloak()
+    if (!kc.authenticated) return null
+    try {
+      // Refresh if the token expires within 30 seconds.
+      await kc.updateToken(30)
+    } catch {
+      return null
+    }
+    return kc.token || null
+  }, [])
 
   const value = useMemo(
     () => ({
-      user,
+      authenticated,
       loading,
+      initError,
       login,
       signup,
       logout,
-      completeLogin,
       getAccessToken,
     }),
-    [user, loading, login, signup, logout, completeLogin, getAccessToken],
+    [authenticated, loading, initError, login, signup, logout, getAccessToken],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

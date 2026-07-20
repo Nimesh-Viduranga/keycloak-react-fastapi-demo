@@ -23,7 +23,7 @@ decision** (tokens exposed to the browser / XSS) and a short hardening checklist
 ┌─────────┐   authorization code + PKCE (S256)   ┌──────────┐
 │  React  │ ───────────────────────────────────▶ │ Keycloak │
 │  (SPA)  │ ◀──── id/access/refresh tokens ────── │  (:8090) │
-└────┬────┘        (held in sessionStorage)       └──────────┘
+└────┬────┘     (in adapter memory; not web storage) └──────────┘
      │  GET /api/me   Authorization: Bearer <access_token>   (same-origin via nginx)
      ▼
 ┌──────────┐
@@ -40,11 +40,11 @@ decision** (tokens exposed to the browser / XSS) and a short hardening checklist
 
 | Concern | Implementation | Standard | Status |
 |---|---|---|---|
-| Grant type | `response_type=code` via `oidc-client-ts` | RFC 9700 / OAuth 2.1 (code for SPAs) | ✅ |
+| Grant type | `response_type=code` via `keycloak-js` | RFC 9700 / OAuth 2.1 (code for SPAs) | ✅ |
 | PKCE | library verifier/challenge; realm enforces `S256` | RFC 7636 | ✅ |
 | Implicit / ROPC | both disabled on the client | BCP deprecates both | ✅ |
 | Client type | public client, no secret | correct for SPA | ✅ |
-| id_token validation | `oidc-client-ts` checks sig/iss/aud/exp/nonce/state | OIDC Core §3.1.3.7 | ✅ (library) |
+| id_token validation | `keycloak-js` checks tokens after code exchange | OIDC Core §3.1.3.7 | ✅ (library) |
 | RS token validation | JWKS + iss + exp + **aud** + RS256 pinned + azp | RFC 9068 §4 | ✅ (after P1 fix) |
 | Refresh tokens | rotation + reuse detection | RFC 9700 §6.1 | ✅ (after P3 fix) |
 | CORS | Bearer auth, `allow_credentials=false`, scoped origins | no cookies → correct | ✅ |
@@ -58,9 +58,11 @@ Severity: **P1** highest. "Fixed" items were addressed in this change set
 |---|---|---|---|
 | P1 | RS disabled audience verification; accepted `aud` **OR** `azp==client_id` — any token minted for the SPA was accepted regardless of intended audience (confused-deputy). | `backend/app/auth.py` | **Fixed** — strict `aud` via PyJWT + Keycloak audience mapper; `azp` now defense-in-depth only. |
 | P3 | Refresh tokens not rotated; browser-held refresh token could be replayed. | realm | **Fixed** — `revokeRefreshToken` + `refreshTokenMaxReuse=0`, `accessTokenLifespan=300`. |
-| P4 | React 19 StrictMode double-invoked the callback effect → second `signinRedirectCallback()` fails redeeming the one-time code. | `frontend/src/pages/Callback.jsx` | **Fixed** — `useRef` latch. |
-| P5 | Sign-up mutated cached discovery metadata (`authorization_endpoint`), restored only on error. | `frontend/src/auth/oidc.js` | **Fixed** — standard `prompt=create`. |
-| P2 | Access **and refresh** tokens live in `sessionStorage` → any XSS = token theft. Inherent to dropping the BFF. | `frontend/src/auth/oidc.js` | **Accepted risk** — requires compensating controls (below). |
+| P4 | React 19 StrictMode must not call `keycloak.init()` twice. | `frontend/src/auth/keycloak.js` | **Fixed** — module-level init promise latch. |
+| P5 | Sign-up should use the adapter’s register helper (not metadata hacks). | `frontend/src/auth/AuthContext.jsx` | **Fixed** — `keycloak.register()`. |
+| P2 | Access **and refresh** tokens live in **adapter memory** (not `sessionStorage`/`localStorage`) → XSS can still read the heap while the tab is alive; a hard refresh clears tokens until SSO re-establishes. | `frontend/src/auth/keycloak.js` | **Accepted risk** — better than durable web storage; still needs CSP / XSS hygiene (below). |
+| P8 | Hard refresh / deep-link to `/dashboard` had no in-memory tokens (`check-sso` avoided — invalid `/` redirect URI + 3P-cookie iframes). | `Dashboard.jsx` | **Fixed** — protected route auto-calls `login()` once (transparent Keycloak SSO bounce). |
+| P9 | Token refresh only on API calls; idle expiry was silent. | `AuthContext.jsx` | **Fixed** — `onTokenExpired` → `updateToken(30)`. |
 | P6 | `VITE_*` env is inlined at build time; the Docker image hardcodes `localhost:8090`. | `frontend/Dockerfile` | **Operational** — inject per-env build args or a runtime `config.js`. |
 | P7 | Dev-mode Keycloak: `start-dev`, `sslRequired=none`, `KC_HOSTNAME_STRICT=false`, HTTP origins. | compose / realm | **Operational** — see pre-prod checklist. |
 
@@ -82,9 +84,13 @@ XSS exposure (P2) is treated as a first-class constraint via the controls below.
 
 - Strict **Content-Security-Policy** (no inline scripts; locked `script-src`).
 - **No** `dangerouslySetInnerHTML` / unsanitized HTML; disciplined dependency
-  hygiene (the SPA's whole dependency tree can read the tokens).
+  hygiene (the SPA's whole dependency tree can read in-memory tokens during XSS).
 - Short access-token TTL (done: 300s) + refresh rotation (done).
-- Consider `sessionStorage` (current, cleared on tab close) over `localStorage`.
+- Prefer **in-memory** tokens (current `keycloak-js` default) over writing access /
+  refresh tokens to `localStorage` / `sessionStorage`. (PKCE `state` may still use
+  short-lived `localStorage` entries — that is not the access token.)
+- Protected routes auto-login via Keycloak SSO (done) instead of fragile iframe
+  `check-sso`.
 
 ## Pre-production checklist (P6/P7 and deployment)
 
@@ -95,6 +101,6 @@ XSS exposure (P2) is treated as a first-class constraint via the controls below.
 - **Issuer/hostname consistency:** the `iss` the browser receives must equal the
   `issuer` the backend validates *and* the JWKS URL must be reachable from the
   backend (classic split-network pitfall behind proxies).
-- Frontend build: inject `VITE_KEYCLOAK_AUTHORITY` / `VITE_CLIENT_ID` per
+- Frontend build: inject `VITE_KEYCLOAK_URL` / `VITE_KEYCLOAK_REALM` / `VITE_CLIENT_ID` per
   environment (build args or runtime config), not the baked localhost defaults.
 - Enable Keycloak **brute-force protection** and review token/session lifespans.
