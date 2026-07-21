@@ -15,7 +15,7 @@ services:
       retries: 10
 
   keycloak:
-    image: quay.io/keycloak/keycloak:26.0
+    image: quay.io/keycloak/keycloak:26.1
     container_name: brandvisual-keycloak
     depends_on:
       keycloak-db:
@@ -57,7 +57,12 @@ services:
 
   # Nginx: React static + reverse proxy /api → backend
   nginx:
-    build: ./frontend
+    build:
+      context: ./frontend
+      args:
+        VITE_KEYCLOAK_URL: http://localhost:8090
+        VITE_KEYCLOAK_REALM: brandvisual
+        VITE_CLIENT_ID: react-fastapi-demo
     container_name: brandvisual-nginx
     ports:
       - "8088:80"

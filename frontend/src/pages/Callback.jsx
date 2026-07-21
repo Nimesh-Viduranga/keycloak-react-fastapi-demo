@@ -1,25 +1,33 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
 
+/**
+ * Keycloak redirects here with ?code&state. AuthProvider's keycloak.init()
+ * performs the PKCE code exchange. This page only waits for init, then routes on.
+ */
 export default function Callback() {
-  const { completeLogin } = useAuth()
+  const { loading, authenticated, initError } = useAuth()
   const navigate = useNavigate()
   const [error, setError] = useState('')
+  const navigatedRef = useRef(false)
 
   useEffect(() => {
-    let cancelled = false
-    completeLogin()
-      .then(() => {
-        if (!cancelled) navigate('/dashboard', { replace: true })
-      })
-      .catch((e) => {
-        if (!cancelled) setError(e.message || 'Login callback failed')
-      })
-    return () => {
-      cancelled = true
+    if (loading || navigatedRef.current) return
+
+    if (initError) {
+      setError(initError)
+      return
     }
-  }, [completeLogin, navigate])
+
+    navigatedRef.current = true
+    if (authenticated) {
+      navigate('/dashboard', { replace: true })
+    } else {
+      setError('Sign-in did not complete. Try logging in again.')
+      navigatedRef.current = false
+    }
+  }, [loading, authenticated, initError, navigate])
 
   if (error) {
     return (

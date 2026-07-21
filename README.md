@@ -48,7 +48,7 @@ docker compose down
 
 | Piece | Role |
 |-------|------|
-| React + `oidc-client-ts` | Redirect to Keycloak, PKCE code exchange, hold tokens |
+| React + `keycloak-js` | Redirect to Keycloak, PKCE code exchange, hold tokens |
 | FastAPI | `GET /api/me` — verify access token via JWKS |
 | nginx | Same-origin static UI + `/api` proxy |
 | Keycloak | Login / register / issue tokens |

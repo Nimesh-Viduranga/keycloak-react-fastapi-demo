@@ -24,23 +24,27 @@ def decode_access_token(token: str, settings: Settings | None = None) -> dict[st
     settings = settings or get_settings()
     try:
         signing_key = _jwks_client(settings).get_signing_key_from_jwt(token)
+        # RFC 9068 §4: verify signature, issuer, expiry, AND that our identifier
+        # is in `aud`. PyJWT enforces `aud` when `audience=` is passed and
+        # verify_aud is on (default), rejecting tokens minted for other resources.
         claims = jwt.decode(
             token,
             signing_key.key,
             algorithms=["RS256"],
             issuer=settings.issuer,
-            options={"verify_aud": False},
+            audience=settings.api_audience,
+            leeway=settings.clock_skew_leeway,
+            options={"require": ["exp", "iat", "iss", "aud"]},
         )
     except jwt.PyJWTError as exc:
         raise HTTPException(status_code=401, detail=f"Invalid token: {exc}") from exc
 
+    # Defense in depth: this API is only meant to receive tokens issued to our
+    # own SPA client, so the authorized party must match. (Relax via env if the
+    # API is ever shared by multiple front-end clients.)
     azp = claims.get("azp")
-    aud = claims.get("aud")
-    client_id = settings.keycloak_client_id
-    aud_ok = aud == client_id or (isinstance(aud, list) and client_id in aud)
-    azp_ok = azp == client_id
-    if not (aud_ok or azp_ok):
-        raise HTTPException(status_code=401, detail="Token audience/azp mismatch")
+    if azp is not None and azp != settings.keycloak_client_id:
+        raise HTTPException(status_code=401, detail="Unexpected authorized party (azp)")
 
     return claims
 

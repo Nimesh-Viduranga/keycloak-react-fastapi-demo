@@ -1,7 +1,7 @@
 import { useAuth } from '../auth/AuthContext'
 
 export default function Home() {
-  const { login, signup, user, loading } = useAuth()
+  const { login, signup, authenticated, loading, initError } = useAuth()
   const params = new URLSearchParams(window.location.search)
   const error = params.get('error')
 
@@ -9,17 +9,19 @@ export default function Home() {
     <section className="card">
       <h1>React + FastAPI + Keycloak</h1>
       <p className="muted">
-        SPA OIDC client: React runs authorization code + PKCE with Keycloak.
+        SPA OIDC client via <code>keycloak-js</code> (authorization code + PKCE).
         FastAPI only validates Bearer JWTs on <code>/api/me</code>.
       </p>
 
-      {error && (
-        <p className="error">Login failed ({error}). Check Keycloak client config.</p>
+      {(error || initError) && (
+        <p className="error">
+          {initError || `Login failed (${error}). Check Keycloak client config.`}
+        </p>
       )}
 
       {loading ? (
         <p className="muted">Checking session…</p>
-      ) : user ? (
+      ) : authenticated ? (
         <div className="actions">
           <a className="btn primary" href="/dashboard">
             Go to dashboard
@@ -39,7 +41,10 @@ export default function Home() {
       <ol className="steps">
         <li>Click Log in or Sign up — browser redirects to Keycloak.</li>
         <li>After auth, Keycloak returns to <code>/callback</code> with a code.</li>
-        <li>React exchanges the code (PKCE) and calls <code>/api/me</code> with the access token.</li>
+        <li>
+          <code>keycloak-js</code> exchanges the code (PKCE) and the app calls{' '}
+          <code>/api/me</code> with the access token.
+        </li>
       </ol>
     </section>
   )
